@@ -14,7 +14,7 @@ use dpi::PhysicalPosition;
 use objc2::rc::Retained;
 use objc2::{define_class, msg_send, AllocAnyThread, DeclaredClass, MainThreadMarker};
 use objc2_app_kit::{
-    NSEvent, NSStatusBar, NSStatusItem, NSTrackingArea, NSTrackingAreaOptions,
+    NSEvent, NSScreen, NSStatusBar, NSStatusItem, NSTrackingArea, NSTrackingAreaOptions,
     NSVariableStatusItemLength, NSView,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
@@ -162,9 +162,14 @@ impl TrayTarget {
         let tray_icon_id =
             winit_extras_core::tray_icon_id::TrayIconId::from_raw(self.ivars().tray_icon_id);
 
-        // Get cursor position
+        let mtm = MainThreadMarker::from(self);
         let mouse_location = NSEvent::mouseLocation();
-        let position = PhysicalPosition::new(mouse_location.x, mouse_location.y);
+        let screen_height = NSScreen::screens(mtm)
+            .objectAtIndex(0)
+            .frame()
+            .size
+            .height;
+        let position = PhysicalPosition::new(mouse_location.x, screen_height - mouse_location.y);
 
         trace!(?button, ?state, ?position, "Tray mouse event");
 
