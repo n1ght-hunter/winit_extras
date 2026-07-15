@@ -10,7 +10,7 @@ use skrifa::metrics::GlyphMetrics;
 use vello_cpu::Glyph;
 use vello_cpu::kurbo::Rect;
 use vello_cpu::peniko::FontData;
-use vello_cpu::{Pixmap, RenderContext};
+use vello_cpu::{Pixmap, RenderContext, Resources};
 use winit::dpi::{PhysicalPosition, PhysicalSize, Position, Size};
 use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
@@ -139,6 +139,7 @@ pub struct VelloContextMenu<T> {
     surface: Mutex<softbuffer::Surface<Arc<dyn Window>, Arc<dyn Window>>>,
     data: Mutex<MenuData<T>>,
     renderer: Mutex<RenderContext>,
+    resources: Mutex<Resources>,
     pixmap: Mutex<Pixmap>,
 }
 
@@ -198,6 +199,7 @@ impl<T: Clone + Send + Sync + 'static> VelloContextMenu<T> {
             surface: Mutex::new(surface),
             data: Mutex::new(data),
             renderer: Mutex::new(RenderContext::new(menu_width as u16, menu_height as u16)),
+            resources: Mutex::new(Resources::new()),
             pixmap: Mutex::new(Pixmap::new(menu_width as u16, menu_height as u16)),
         })
     }
@@ -259,6 +261,7 @@ impl<T: Clone + Send + Sync + 'static> VelloContextMenu<T> {
     fn render(&self) {
         let data = self.data.lock().unwrap();
         let mut renderer = self.renderer.lock().unwrap();
+        let mut resources = self.resources.lock().unwrap();
         let mut pixmap = self.pixmap.lock().unwrap();
 
         let style = &data.style;
@@ -333,14 +336,14 @@ impl<T: Clone + Send + Sync + 'static> VelloContextMenu<T> {
                 );
                 if !glyphs.is_empty() {
                     renderer
-                        .glyph_run(font)
+                        .glyph_run(&mut resources, font)
                         .font_size(font_size)
                         .fill_glyphs(glyphs.into_iter());
                 }
             }
         }
 
-        renderer.render_to_pixmap(&mut pixmap);
+        renderer.render_to_pixmap(&mut resources, &mut pixmap);
     }
 
     fn present(&self) {

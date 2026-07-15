@@ -3265,7 +3265,7 @@ dependencies = [
  "softbuffer",
  "tracing",
  "vello_cpu",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
  "winit",
  "winit_extras_core",
 ]
@@ -3278,7 +3278,7 @@ dependencies = [
  "dpi",
  "raw-window-handle",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
  "winit-core",
  "winit_extras_core",
 ]
