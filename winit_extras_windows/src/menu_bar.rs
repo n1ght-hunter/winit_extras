@@ -4,6 +4,8 @@
 
 use std::collections::HashMap;
 use std::ptr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use rwh_06::{HasWindowHandle, RawWindowHandle};
 use windows_sys::Win32::{
@@ -32,6 +34,9 @@ struct MenuBarState<T> {
     id_map: HashMap<u32, T>,
     proxy: MenuBarProxy<T>,
     menu_bar_id: MenuBarId,
+    /// Cleared by the subclass proc on `WM_NCDESTROY`. `MenuBar::drop` reads this
+    /// to decide whether the window (and its OS-owned menu) still exist.
+    window_alive: Arc<AtomicBool>,
 }
 
 impl<T: Clone + Send + Sync + 'static> MenuBarState<T> {
@@ -56,6 +61,7 @@ pub struct MenuBar {
     hmenu: HMENU,
     state_ptr: *mut (),
     cleanup: CleanupFn,
+    window_alive: Arc<AtomicBool>,
 }
 
 unsafe impl Send for MenuBar {}
@@ -90,10 +96,13 @@ impl MenuBar {
         let internal_id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let menu_bar_id = MenuBarId::from_raw(internal_id);
 
+        let window_alive = Arc::new(AtomicBool::new(true));
+
         let mut state = Box::new(MenuBarState {
             id_map: HashMap::new(),
             proxy,
             menu_bar_id,
+            window_alive: window_alive.clone(),
         });
 
         let mut next_id: u32 = 1;
@@ -143,6 +152,7 @@ impl MenuBar {
             hmenu,
             state_ptr: state_ptr as *mut (),
             cleanup: cleanup_subclass::<T>,
+            window_alive,
         })
     }
 
@@ -189,9 +199,16 @@ impl CoreMenuBar for MenuBar {
 impl Drop for MenuBar {
     fn drop(&mut self) {
         unsafe {
-            SetMenu(self.hwnd, ptr::null_mut());
+            // If the window is gone, `WM_NCDESTROY` already detached and freed the
+            // menu; touching `hwnd`/`hmenu` would be use-after-free. Only detach the
+            // menu while the window still exists.
+            if self.window_alive.load(Ordering::Acquire) {
+                SetMenu(self.hwnd, ptr::null_mut());
+                destroy_menu_tree(self.hmenu);
+            }
+            // Always remove the subclass (a no-op if the window already tore it down)
+            // and free the state box. This is the sole owner, so it frees exactly once.
             (self.cleanup)(self.hwnd, self.state_ptr);
-            destroy_menu_tree(self.hmenu);
         }
     }
 }
@@ -205,8 +222,11 @@ unsafe extern "system" fn menubar_subclass_proc<T: Clone + Send + Sync + 'static
     dw_ref_data: usize,
 ) -> LRESULT {
     if msg == WM_NCDESTROY && dw_ref_data != 0 {
-        let state = dw_ref_data as *mut MenuBarState<T>;
-        drop(unsafe { Box::from_raw(state) });
+        // The window is being destroyed; the OS frees the attached menu itself.
+        // Flag it so `MenuBar::drop` skips menu/subclass teardown. Ownership of
+        // the state box stays with `MenuBar`, which frees it exactly once on drop.
+        let state = dw_ref_data as *const MenuBarState<T>;
+        unsafe { (*state).window_alive.store(false, Ordering::Release) };
         unsafe {
             RemoveWindowSubclass(hwnd, Some(menubar_subclass_proc::<T>), MENUBAR_SUBCLASS_ID)
         };

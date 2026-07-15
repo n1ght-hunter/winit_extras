@@ -16,7 +16,7 @@ use windows_sys::Win32::{
             DestroyWindow, GWL_USERDATA, GetCursorPos, HICON, IDI_APPLICATION, LoadIconW,
             PostMessageW, RegisterClassExW, WM_CREATE, WM_LBUTTONDOWN, WM_LBUTTONUP,
             WM_MBUTTONDOWN, WM_MBUTTONUP, WM_NCCREATE, WM_RBUTTONDOWN, WM_RBUTTONUP,
-            WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+            WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
             WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_OVERLAPPED,
         },
     },
@@ -77,8 +77,9 @@ impl<T: Clone + Send + Sync + 'static> Tray<T> {
         };
         if let Some(tooltip) = &tooltip {
             let tip = util::encode_wide(tooltip);
+            // Leave the final cell as the NUL terminator (szTip is [u16; 128]).
             #[allow(clippy::manual_memcpy)]
-            for i in 0..tip.len().min(128) {
+            for i in 0..tip.len().min(127) {
                 nid.szTip[i] = tip[i];
             }
         }
@@ -403,11 +404,9 @@ unsafe fn public_window_callback_inner(
                 if (lparam as u32 == WM_LBUTTONUP
                     || lparam as u32 == WM_RBUTTONUP
                     || lparam as u32 == WM_MBUTTONUP
-                    || lparam as u32 == WM_XBUTTONUP
                     || lparam as u32 == WM_LBUTTONDOWN
                     || lparam as u32 == WM_RBUTTONDOWN
-                    || lparam as u32 == WM_MBUTTONDOWN
-                    || lparam as u32 == WM_XBUTTONDOWN) =>
+                    || lparam as u32 == WM_MBUTTONDOWN) =>
             {
                 let mut point = POINT { x: 0, y: 0 };
                 if unsafe { GetCursorPos(&mut point) } == 0 {
@@ -423,20 +422,6 @@ unsafe fn public_window_callback_inner(
                     x if x == WM_LBUTTONDOWN => (ElementState::Pressed, MouseButton::Left),
                     x if x == WM_RBUTTONDOWN => (ElementState::Pressed, MouseButton::Right),
                     x if x == WM_MBUTTONDOWN => (ElementState::Pressed, MouseButton::Middle),
-                    x if x == WM_XBUTTONUP => {
-                        if let Some(button) = MouseButton::try_from_u8(x as u8) {
-                            (ElementState::Released, button)
-                        } else {
-                            return;
-                        }
-                    }
-                    x if x == WM_XBUTTONDOWN => {
-                        if let Some(button) = MouseButton::try_from_u8(x as u8) {
-                            (ElementState::Pressed, button)
-                        } else {
-                            return;
-                        }
-                    }
                     _ => unreachable!("Invalid mouse button event"),
                 };
 
@@ -506,13 +491,15 @@ unsafe fn register_tray_icon<S: AsRef<OsStr>>(
     if let Some(tooltip) = tooltip {
         flags |= NIF_TIP;
         let tip = util::encode_wide(tooltip);
+        // Leave the final cell as the NUL terminator (szTip is [u16; 128]).
         #[allow(clippy::manual_memcpy)]
-        for i in 0..tip.len().min(128) {
+        for i in 0..tip.len().min(127) {
             sz_tip[i] = tip[i];
         }
     }
 
     let mut nid = NOTIFYICONDATAW {
+        cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
         uFlags: flags,
         hWnd: hwnd,
         uID: tray_icon_id,

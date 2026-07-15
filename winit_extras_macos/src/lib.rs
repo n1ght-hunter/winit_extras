@@ -59,10 +59,16 @@ impl<T> std::fmt::Debug for Tray<T> {
     }
 }
 
+// The event handler is type-erased to `Event<()>` because `TrayTarget` is a
+// non-generic Objective-C class and cannot carry `T`. This is sound: the only
+// event emitted here is `PointerButton`, which carries no `T` payload.
+type TrayEventHandler = Box<dyn Fn(Event<()>) + Send + Sync>;
+
 // Instance variables for TrayTarget
 struct TrayTargetIvars {
     tray_icon_id: usize,
     status_item: Retained<NSStatusItem>,
+    event_handler: TrayEventHandler,
 }
 
 define_class!(
@@ -173,15 +179,11 @@ impl TrayTarget {
 
         trace!(?button, ?state, ?position, "Tray mouse event");
 
-        TRAY_EVENT_HANDLER.with(|handler| {
-            if let Some(handler) = handler.borrow().as_ref() {
-                handler(Event::PointerButton {
-                    tray_icon_id,
-                    state,
-                    position,
-                    button: winit_core::event::ButtonSource::Mouse(button),
-                });
-            }
+        (self.ivars().event_handler)(Event::PointerButton {
+            tray_icon_id,
+            state,
+            position,
+            button: winit_core::event::ButtonSource::Mouse(button),
         });
     }
 
@@ -192,13 +194,6 @@ impl TrayTarget {
     }
 }
 
-// Thread-local storage for the event handler callback
-// This is necessary because we can't pass closures through Objective-C
-type TrayEventHandler = Box<dyn Fn(Event<()>) + Send + Sync>;
-thread_local! {
-    static TRAY_EVENT_HANDLER: std::cell::RefCell<Option<TrayEventHandler>> = const { std::cell::RefCell::new(None) };
-}
-
 impl<T: Clone + Send + Sync + 'static> Tray<T> {
     pub fn new(proxy: EventCallback<T>, attr: TrayIconAttributes) -> Result<Self, anyhow::Error> {
         let mtm = MainThreadMarker::new()
@@ -206,26 +201,25 @@ impl<T: Clone + Send + Sync + 'static> Tray<T> {
 
         let internal_id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-        // Set up the event handler
+        // Set up the event handler. `PointerButton` carries no `T`, so we can rebuild
+        // the `Event<T>` the proxy expects from the type-erased `Event<()>`.
         let proxy_clone = proxy.clone();
-        TRAY_EVENT_HANDLER.with(|handler| {
-            *handler.borrow_mut() = Some(Box::new(move |event| {
-                let typed_event = match event {
-                    Event::PointerButton {
-                        tray_icon_id,
-                        state,
-                        position,
-                        button,
-                    } => Event::PointerButton {
-                        tray_icon_id,
-                        state,
-                        position,
-                        button,
-                    },
-                    _ => return,
-                };
-                (proxy_clone)(typed_event);
-            }));
+        let event_handler: TrayEventHandler = Box::new(move |event| {
+            let Event::PointerButton {
+                tray_icon_id,
+                state,
+                position,
+                button,
+            } = event
+            else {
+                return;
+            };
+            (proxy_clone)(Event::PointerButton {
+                tray_icon_id,
+                state,
+                position,
+                button,
+            });
         });
 
         // Create status item
@@ -256,6 +250,7 @@ impl<T: Clone + Send + Sync + 'static> Tray<T> {
         let target = mtm.alloc().set_ivars(TrayTargetIvars {
             tray_icon_id: internal_id,
             status_item: status_item.clone(),
+            event_handler,
         });
 
         let tray_target: Retained<TrayTarget> =
