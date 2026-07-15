@@ -11,7 +11,7 @@ anyhow.workspace = true
 tracing.workspace = true
 vello_cpu.workspace = true
 softbuffer.workspace = true
-skrifa = "0.40"
+skrifa = "0.44"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys.workspace = true

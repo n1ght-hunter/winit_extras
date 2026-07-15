@@ -79,15 +79,15 @@ tracing-subscriber = "0.3"
 
 # Image processing
 image = "0.25"
-png = "0.17"
+png = "0.18"
 
 # Rendering (for examples)
-vello_cpu = "0.0.7"
-vello_common = "0.0.7"
+vello_cpu = "0.0.9"
+vello_common = "0.0.9"
 softbuffer = "0.4"
 
 # Windows platform
-windows-sys = "0.59.0"
+windows-sys = "0.61.2"
 
 # macOS platform (objc2 ecosystem)
 objc2 = "0.6"
